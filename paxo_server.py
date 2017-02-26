@@ -105,21 +105,45 @@ class Paxo_server:
 		elif type_of_message == "Propose":
 			# Add it to accepted
 			leader_num, seq, request_message = tuple(rest_of_message.split(' ', 2))
+			leader_num = int(leader_num)
+			seq = int(seq)
 			request = parse_request(request_message)
-			client_address = '{}:{}'.format(request['host'], request['port_number'])
-			# TODO
+			client_address = "{}:{}".format(request['host'], request['port_number'])
 			if leader_num >= self.leader_num:
 				if client_address not in self.accepted or self.accepted[client_address][0] < request['client_seq']:
-					self.accepted[client_address] = [request['client_seq'], leader_num, seq, command, 0]
-				else:
-
+					self.accepted[client_address] = [request['client_seq'], leader_num, seq, request['command'], 0]
+				message = "Accept {} {} {}".format(str(leader_num), str(seq), request_message)
+				for i in xrange(self.num_replicas):
+					send_message(self.address_list[i][0], self.address_list[i][1], message)
 
 		elif type_of_message == "Accept":
 			# TODO
 			# Record the # of "Accept"
 			# Write it to log until it hits f+1 and remove it from accepted
+			leader_num, seq, request_message = tuple(rest_of_message.split(' ', 2))
+			leader_num = int(leader_num)
+			seq = int(seq)
+			request = parse_request(request_message)
+			client_address = "{}:{}".format(request['host'], request['port_number'])
+			if leader_num >= self.leader_num:
+				if client_address not in self.accepted or self.accepted[client_address][0] < request['client_seq']:
+					self.accepted[client_address] = [request['client_seq'], leader_num, seq, request['command'], 1]
+				elif self.accepted[client_address][0] == request['client_seq']:
+					self.accepted[client_address][4] += 1
+					if self.accepted[client_address][4] >= self.max_failure + 1:
+						append_log(self, seq, request['command'])
+						execute(self)
+						del self.accepted[client_address]
+
 		elif type_of_message == "Request":
 			#TODO
+			if self.replica_id == self.leader_id:
+				assigned_seq = self.executed_command_seq + 1
+				message = "Propose {} {} {}".format(str(self.leader_num), assigned_seq, message)
+				for i in xrange(self.num_replicas):
+					send_message(self.address_list[i][0], self.address_list[i][1], message)
+			else:	# forward message to current leader
+				send_message(self.address_list[self.leader_id][0], self.address_list[self.leader_id][1], message])
 
 		elif type_of_message == "WhoIsLeader":
 			host, port_number = tuple(rest_of_message.split(' '))
@@ -152,3 +176,16 @@ class Paxo_server:
 			'command': components[4]
 		}
 		return request
+
+	def append_log(self, seq, command):
+		with open(self.log_filename, 'a') as f:
+			new_log_entry = "{} {}".formate(str(seq), command)
+			f.write(new_log_entry)
+			self.log[seq] = command
+
+	def execute(self):
+		with open(self.chat_log_filename, 'a') as f:
+			while self.executed_command_seq + 1 in self.log:
+				self.executed_command_seq += 1
+				f.write(self.log[self.executed_command_seq])
+
