@@ -1,10 +1,15 @@
-import socket, threading, multiprocessing, datetime, json
+import socket, threading, multiprocessing, datetime, json, os
+from paxos_utils import json_spaceless_dump
+from multiprocessing import Process
+from time import sleep
 
 TIMEOUT = 10
 HEARTBEART_CYCLE = 3
+
 # make it possible to skip some sequence number
-class Paxo_server:
+class Paxo_server(Process):
 	def __init__(self, max_failure, replica_id, address_list):
+		super(Paxo_server, self).__init__()
 		# 0. Initialize internal data
 		self.max_failure = max_failure
 		self.num_replicas = 2 * max_failure + 1
@@ -18,6 +23,7 @@ class Paxo_server:
 		self.log = {}		# {seq: command}
 		self.accepted = {}	# {client_address: [client_seq, leader_num, seq, command, num_of_accepted]}
 		self.executed_command_seq = -1
+		self.assigned_command_seq = -1
 		self.leader_num = -1
 
 		self.num_followers = 0
@@ -25,7 +31,7 @@ class Paxo_server:
 
 		self.replica_heartbeat = []
 		
-		load_log(self)
+		self.load_log()
 		for i in xrange(self.num_replicas):
 			self.replica_heartbeat.append(datetime.datetime.now())
 
@@ -33,25 +39,30 @@ class Paxo_server:
 		self.heartbeat_lock = threading.Lock()
 		self.leader_lock = threading.Lock()
 		
+	def run(self):
 		# 1. Create new UDP socket (receiver)
 		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		sock.bind((self.host, self.port_number))
 
 		# 2. Create heartbeat sender and failure detector
-		heartbeat_sender_thread = threading.Thread(name="heartbeat_sender_" + str(replica_id),
-												   target=heartbeat_sender, args=(self,))
-		failure_detector_thread = threading.Thread(name="failure_detector_" + str(replica_id),
-												   target=failure_detector, args=(self,))
+		heartbeat_sender_thread = threading.Thread(name="heartbeat_sender_" + str(self.replica_id),
+												   target=self.heartbeat_sender, args=())
+		failure_detector_thread = threading.Thread(name="failure_detector_" + str(self.replica_id),
+												   target=self.failure_detector, args=())
+		heartbeat_sender_thread.start()
+		failure_detector_thread.start()
 		
 		# 3. Start receiving message
 		while True:
+			self.debug_print('wait for message')
 			message = sock.recv(65535)
-			message_handler(self, message)
+			self.message_handler(message)
 
 	def heartbeat_sender(self):
 		heartbeat_message = "Heartbeat {}".format(str(self.replica_id))
 		while True:
-			broadcast(self, heartbeat_message)
+			self.debug_print("send heartbeat")
+			self.broadcast(heartbeat_message)
 			sleep(HEARTBEART_CYCLE)
 
 	def failure_detector(self):
@@ -61,7 +72,8 @@ class Paxo_server:
 			for i in xrange(self.num_replicas):
 				if (datetime.datetime.now() - self.replica_heartbeat[i]).total_seconds() < TIMEOUT or i == self.replica_id:
 					new_live_set.append(i)
-			if self.replica_id == new_live_set[0] and (self.leader_num % self.num_replicas) not in new_live_set:
+			if self.replica_id == new_live_set[0] and\
+				( (self.leader_num % self.num_replicas) not in new_live_set or self.leader_num == -1 ):
 				# message = "YouShouldBeLeader {}".format(str(self.replica_id))
 				# send_message(self.host, self.port_number, message)
 				self.followers = 1
@@ -70,7 +82,7 @@ class Paxo_server:
 					new_leader_num += self.num_replicas
 				message = "IAmLeader {}".format(str(new_leader_num))
 				self.leader_num = new_leader_num
-				broadcast(self, message)
+				self.broadcast(message)
 			sleep(TIMEOUT)
 
 	def message_handler(self, message):
@@ -95,27 +107,31 @@ class Paxo_server:
 			new_leader_num = int(rest_of_message)
 			if new_leader_num > self.leader_num:
 				leader_id = new_leader_num % self.num_replicas
-				response = "YouAreLeader {} {}".format(json.dumps(self.log), json.dumps(self.accepted.values()))
-				send_message(self.address_list[leader_id][0], self.address_list[leader_id][1], response)
+				response = "YouAreLeader {} {}".format(json_spaceless_dump(self.log)
+					, json_spaceless_dump(self.accepted.values()))
+				self.send_message(self.address_list[leader_id][0], self.address_list[leader_id][1], response)
 				self.leader_num = new_leader_num
 		elif type_of_message == "YouAreLeader":
 			# TODO
-			sender_id, committed_log, accepted = 
+			committed_log, accepted = tuple(rest_of_message.split(' ', 1))
+			self.num_followers += 1
+			if self.num_followers >= self.max_failure + 1:
+				self.leader_num = self.replica_id + (self.leader_num - (self.leader_num % self.num_replicas))
 
 		elif type_of_message == "Propose":
 			# Add it to accepted
 			leader_num, seq, request_message = tuple(rest_of_message.split(' ', 2))
 			leader_num = int(leader_num)
 			seq = int(seq)
-			request = parse_request(request_message)
+			request = self.parse_request(request_message)
 			client_address = "{}:{}".format(request['host'], request['port_number'])
 			if leader_num >= self.leader_num:
 				if client_address not in self.accepted or self.accepted[client_address][0] < request['client_seq']:
 					self.accepted[client_address] = [request['client_seq'], leader_num, seq, request['command'], 1]
 				elif self.accepted[client_address][0] == request['client_seq']:
-					self.accepted[client_address][4] += 1
+					self.accepted[client_address][4] = 1#+= 1 #??? proposed again means view change happened, recount??
 				message = "Accept {} {} {}".format(str(leader_num), str(seq), request_message)
-				broadcast(self, message)
+				self.broadcast(message)
 
 		elif type_of_message == "Accept":
 			# Record the # of "Accept"
@@ -123,7 +139,7 @@ class Paxo_server:
 			leader_num, seq, request_message = tuple(rest_of_message.split(' ', 2))
 			leader_num = int(leader_num)
 			seq = int(seq)
-			request = parse_request(request_message)
+			request = self.parse_request(request_message)
 			client_address = "{}:{}".format(request['host'], request['port_number'])
 			if leader_num >= self.leader_num:
 				if client_address not in self.accepted or self.accepted[client_address][0] < request['client_seq']:
@@ -131,29 +147,35 @@ class Paxo_server:
 				elif self.accepted[client_address][0] == request['client_seq']:
 					self.accepted[client_address][4] += 1
 					if self.accepted[client_address][4] >= self.max_failure + 1:
-						append_log(self, seq, request['command'])
-						execute(self)
+						self.append_log(seq, request['command'])
+						self.execute()
+						if self.isLeader():
+							message = "Reply {}".format(request['client_seq'])
+							self.send_message(request['host'], int(request['port_number']), message)
 						del self.accepted[client_address]
 
 		elif type_of_message == "Request":
-			if self.replica_id == self.leader_num % self.num_replicas:
-				assigned_seq = self.executed_command_seq + 1
-				request = parse_request(message)
+			if self.isLeader():
+				self.debug_print(' leader processing client request')
+				assigned_seq = self.assigned_command_seq + 1
+				self.assigned_command_seq += 1
+				request = self.parse_request(message)
 				client_address = "{}:{}".format(request['host'], request['port_number'])
 				self.accepted[client_address] = [request['client_seq'], self.leader_num, assigned_seq, request['command'], 1]
 				message = "Propose {} {} {}".format(str(self.leader_num), assigned_seq, message)
-				broadcast(self, message)
+				self.broadcast(message)
 			else:	# forward message to current leader
 				leader_id = self.leader_num % self.num_replicas
-				send_message(self.address_list[leader_id][0], self.address_list[leader_id][1], message])
+				self.send_message(self.address_list[leader_id][0], self.address_list[leader_id][1], message)
 
 		elif type_of_message == "WhoIsLeader":
 			host, port_number = tuple(rest_of_message.split(' '))
 			message = "LeaderIs {}".format(str(self.leader_num % self.num_replicas))
-			send_message(host, port_number, message)
+			self.send_message(host, port_number, message)
 		
 
-	def send_message(host, port_number, message):
+	def send_message(self, host, port_number, message):
+		self.debug_print("=== sending message :"+ message + " ===")
 		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		sock.connect((host, port_number))
 		sock.sendall(message)
@@ -162,7 +184,7 @@ class Paxo_server:
 	def broadcast(self, message):
 		for i in xrange(self.num_replicas):
 			if i != self.replica_id:
-				send_message(self.address_list[i][0], self.address_list[i][1], message)
+				self.send_message(self.address_list[i][0], self.address_list[i][1], message)
 
 	# Need to update chat_log accordingly ?!
 	def load_log(self):
@@ -174,7 +196,7 @@ class Paxo_server:
 					key, value = tuple(line.split(' ', 1))
 					self.log[key] = value
 
-	def parse_request(request_message):
+	def parse_request(self, request_message):
 		components = request_message.split(' ')
 		request = {
 			'host': components[1],
@@ -186,12 +208,19 @@ class Paxo_server:
 
 	def append_log(self, seq, command):
 		with open(self.log_filename, 'a') as f:
-			new_log_entry = "{} {}".formate(str(seq), command)
-			f.write(new_log_entry)
+			new_log_entry = "{} {}".format(str(seq), command)
+			f.write(new_log_entry+'\n')
 			self.log[seq] = command
 
 	def execute(self):
 		with open(self.chat_log_filename, 'a') as f:
-			while self.executed_command_seq + 1 in self.log:
+			while self.executed_command_seq + 1 <= max(log.keys()):
+				if self.executed_command_seq + 1 in self.log:
+					f.write(self.log[self.executed_command_seq]+'\n')
 				self.executed_command_seq += 1
-				f.write(self.log[self.executed_command_seq])
+
+	def debug_print(self, msg):
+		print str(self.replica_id) + ': '+msg
+
+	def isLeader(self):
+		return self.leader_num % self.num_replicas == self.replica_id
