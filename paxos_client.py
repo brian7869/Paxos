@@ -6,9 +6,9 @@ from random import random
 # TODO
 TIMEOUT = 10
 # send request to known leader, if timeout, ask all replicas WhoIsLeader and pick one with f+1
-class Paxo_client(Process):
+class Paxos_client(Process):
 	def __init__(self, client_id, host, port, max_failure, address_list, commands):
-		super(Paxo_client, self).__init__()
+		super(Paxos_client, self).__init__()
 		self.max_failure = int(max_failure)
 		self.num_replicas = 2 * max_failure + 1
 		self.client_id = int(client_id)
@@ -41,6 +41,7 @@ class Paxo_client(Process):
 				except socket.timeout:
 					message = "WhoIsLeader {} {}".format(self.host, str(self.port))
 					self.broadcast(message)
+		self.debug_print('End of request')
 
 	def message_handler(self, message):
 		# Possible message
