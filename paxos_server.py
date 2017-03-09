@@ -139,7 +139,11 @@ class Paxos_server(Process):
 
 				accepted = json_set_serializable_load(accepted)
 				for slot, inner_dict in accepted.iteritems():
+					slot = int(slot)
 					if slot not in self.accepted or inner_dict['leader_num'] > self.accepted[slot]['leader_num']:
+						self.debug_print('add or replace slot: {}'.format(str(slot)))
+						self.debug_print(str(slot not in self.accepted))
+						self.debug_print(str(inner_dict['leader_num'] > self.accepted[slot]['leader_num']))
 						self.accepted[slot] = inner_dict
 						if inner_dict['done']:
 							self.decide_value(slot)

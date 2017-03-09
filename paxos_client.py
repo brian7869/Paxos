@@ -26,7 +26,7 @@ class Paxos_client(Process):
 		sock.settimeout(TIMEOUT)
 
 		for client_seq in xrange(len(self.commands)):
-			sleep(random())
+			sleep(random()*10)
 			self.debug_print('send request: '+self.commands[client_seq])
 			req_message = "Request {} {} {} {}".format(self.host, str(self.port)
 						, str(client_seq), 'client'+str(self.client_id)+':'+self.commands[client_seq])
