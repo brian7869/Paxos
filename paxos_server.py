@@ -3,6 +3,7 @@ from paxos_utils import json_spaceless_dump, json_set_serializable_load
 from multiprocessing import Process
 from time import sleep
 from config import *
+from random import random
 
 # make it possible to skip some sequence number
 class Paxos_server(Process):
@@ -141,7 +142,7 @@ class Paxos_server(Process):
 					if slot not in self.accepted or inner_dict['leader_num'] > self.accepted[slot]['leader_num']:
 						self.debug_print('add or replace slot: {}'.format(str(slot)))
 						self.debug_print(str(slot not in self.accepted))
-						self.debug_print(str(inner_dict['leader_num'] > self.accepted[slot]['leader_num']))
+						#self.debug_print(str(inner_dict['leader_num'] > self.accepted[slot]['leader_num']))
 						self.accepted[slot] = inner_dict
 						self.client_progress[inner_dict['client_address']] = {'client_seq': inner_dict['client_seq'], 'slot': slot}
 						if inner_dict['done']:
@@ -178,7 +179,7 @@ class Paxos_server(Process):
 				if client_address in self.client_progress\
 					and request['client_seq'] > self.client_progress[client_address]['client_seq']\
 					and not self.accepted[self.client_progress[client_address]['slot']]['done']:
-					slot_to_fill = client_progress[client_address]['slot']
+					slot_to_fill = self.client_progress[client_address]['slot']
 					self.decide_value(slot_to_fill)
 
 				if client_address != '-1:-1':
@@ -415,5 +416,9 @@ class Paxos_server(Process):
 			self.send_message(client_host, client_port, msg)
 
 	def get_new_assigned_slot(self):
-		self.assigned_command_slot += (1 + self.can_skip_slot)
+		jump_slot = 0
+		if self.can_skip_slot > 0:
+			jump_slot = int(0.5 + random())
+			self.can_skip_slot -= jump_slot
+		self.assigned_command_slot += (1 + jump_slot)
 		return self.assigned_command_slot

@@ -22,8 +22,10 @@ if __name__ == '__main__':
 		sys.exit(0)
 
 	signal.signal(signal.SIGINT, signal_handler)
-	os.system('rm -f log/*')
-	os.system('rm -f chat_log/*')
+	os.system('rm -rf log')
+	os.system('rm -rf chat_log')
+	os.system('mkdir log')
+	os.system('mkdir chat_log')
 
 	for replica_id in xrange(num_servers):
 		if replica_id < max_failure and replica_id > 0:
@@ -34,10 +36,12 @@ if __name__ == '__main__':
 	for client_id in xrange(num_clients):
 		subprocess.Popen(['python', 'start_client.py', str(max_failure), str(client_id), str(num_commands)] )
 
-	sleep(10)
+	# Trigger first leader crash which will cause a chain reaction
+	# sleep(10)
+	# processes[0].terminate()
 
-	for i in xrange(max_failure):
-		processes[i].terminate()
-		sleep(10)
-
-	signal.pause()
+	while True:
+		try:
+			signal.pause()
+		except SystemExit as e:
+			pass
