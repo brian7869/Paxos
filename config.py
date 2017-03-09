@@ -1,0 +1,55 @@
+TIMEOUT = 10
+HEARTBEART_CYCLE = 3
+
+# Max 15 (f = 7)
+server_addresses = 	[
+						('localhost', 5500),
+						('localhost', 5501),
+						('localhost', 5502),
+						('localhost', 5503),
+						('localhost', 5504),
+						('localhost', 5505),
+						('localhost', 5506),
+						('localhost', 5507),
+						('localhost', 5508),
+						('localhost', 5509),
+						('localhost', 5510),
+						('localhost', 5511),
+						('localhost', 5512),
+						('localhost', 5513),
+						('localhost', 5514),
+					]
+
+# Max 30
+client_addresses = 	[
+						('localhost', 5515),
+						('localhost', 5516),
+						('localhost', 5517),
+						('localhost', 5518),
+						('localhost', 5519),
+						('localhost', 5520),
+						('localhost', 5521),
+						('localhost', 5522),
+						('localhost', 5523),
+						('localhost', 5524),
+						('localhost', 5525),
+						('localhost', 5526),
+						('localhost', 5527),
+						('localhost', 5528),
+						('localhost', 5529),
+						('localhost', 5530),
+						('localhost', 5531),
+						('localhost', 5532),
+						('localhost', 5533),
+						('localhost', 5534),
+						('localhost', 5535),
+						('localhost', 5536),
+						('localhost', 5537),
+						('localhost', 5538),
+						('localhost', 5539),
+						('localhost', 5540),
+						('localhost', 5541),
+						('localhost', 5542),
+						('localhost', 5543),
+						('localhost', 5544),
+					]
