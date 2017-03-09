@@ -2,9 +2,7 @@ import socket, threading, multiprocessing, datetime, json, os
 from paxos_utils import json_spaceless_dump, json_set_serializable_load
 from multiprocessing import Process
 from time import sleep
-
-TIMEOUT = 10
-HEARTBEART_CYCLE = 3
+from config import *
 
 # make it possible to skip some sequence number
 class Paxos_server(Process):

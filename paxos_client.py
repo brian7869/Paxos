@@ -2,9 +2,8 @@ from multiprocessing import Process
 import socket
 from time import sleep
 from random import random
-# need to implement batch mode
-# TODO
-TIMEOUT = 10
+from config import *
+
 # send request to known leader, if timeout, ask all replicas WhoIsLeader and pick one with f+1
 class Paxos_client(Process):
 	def __init__(self, client_id, host, port, max_failure, address_list, commands):
@@ -37,23 +36,25 @@ class Paxos_client(Process):
 				try:
 					message = sock.recv(65535)
 					if self.message_handler(message):
+						sock.settimeout(TIMEOUT)
 						break
 				except socket.timeout:
-					message = "WhoIsLeader {} {}".format(self.host, str(self.port))
+					message = "ViewChange {} {} {}".format(self.host, str(self.port), str(client_seq))
+					sock.settimeout(sock.gettimeout()* ２)
 					self.broadcast(message)
 		self.debug_print('End of request')
 
-	def message_handler(self, message):
+	def message_handler(self, message, client_seq):
 		# Possible message
 		# From primary:
 		# "Reply <client_seq>"
 		# return True if command succeeded
 		type_of_message, rest_of_message = tuple(message.split(' ', 1))
 
-		if type_of_message == 'Reply':
+		if type_of_message == 'Reply' and client_seq == int(rest_of_message):
 			return True
 		elif type_of_message == 'LeaderIs':
-		# Modify: self.leader
+			# Modify: self.leader
 			self.leader = int(rest_of_message)
 			return False
 		else:

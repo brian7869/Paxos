@@ -1,5 +1,7 @@
 import json, pickle
 
+message_template = "Message {}"
+
 class PythonObjectEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (list, dict, str, unicode, int, float, bool, type(None))):
@@ -16,3 +18,9 @@ def json_spaceless_dump(obj):
 
 def json_set_serializable_load(obj):
 	return json.loads(obj, object_hook=as_python_object)
+
+def command_generator(num_message):
+	commands = []
+	for i in xrange(num_message):
+		commands.append(message_template.format(str(i)))
+	return commands
