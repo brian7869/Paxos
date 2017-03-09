@@ -1,4 +1,4 @@
-import socket, threading, multiprocessing, datetime, json, os
+import socket, threading, multiprocessing, datetime, json, os, sys
 from paxos_utils import json_spaceless_dump, json_set_serializable_load
 from multiprocessing import Process
 from time import sleep
@@ -6,7 +6,7 @@ from config import *
 
 # make it possible to skip some sequence number
 class Paxos_server(Process):
-	def __init__(self, max_failure, replica_id, address_list, can_skip_slot):
+	def __init__(self, max_failure, replica_id, address_list, can_skip_slot, fail_view_change = 0):
 		super(Paxos_server, self).__init__()
 		# 0. Initialize internal data
 		self.max_failure = max_failure
@@ -43,6 +43,7 @@ class Paxos_server(Process):
 		self.assigned_command_slot = -1
 		self.leader_num = -1
 		self.can_skip_slot = can_skip_slot
+		self.fail_view_change = fail_view_change
 
 		self.num_followers = 0
 
@@ -130,7 +131,8 @@ class Paxos_server(Process):
 		elif type_of_message == "YouAreLeader":
 			# TODO
 			new_leader_num, accepted = tuple(rest_of_message.split(' ', 1))
-			if self.num_followers > 0:
+			new_leader_num = int(new_leader_num)
+			if self.num_followers > 0 and new_leader_num > self.leader_num:
 				self.num_followers += 1
 
 				accepted = json_set_serializable_load(accepted)
@@ -154,6 +156,10 @@ class Paxos_server(Process):
 					self.leader_num = int(new_leader_num)
 					msg = "LeaderIs {}".format(str(self.replica_id))
 					self.broadcast_client(msg)
+					### FOR TESTING ###
+					if self.fail_view_change:
+						sys.exit()
+					### FOR TESTING ###
 					self.repropose_undecided_value()
 					self.fill_holes()
 					self.num_followers = 0
@@ -168,13 +174,15 @@ class Paxos_server(Process):
 			if leader_num >= self.leader_num:
 				self.leader_num = leader_num
 
+
 				if client_address in self.client_progress\
-					and request['client_seq'] < self.client_progress[client_address]['client_seq']\
+					and request['client_seq'] > self.client_progress[client_address]['client_seq']\
 					and not self.accepted[self.client_progress[client_address]['slot']]['done']:
 					slot_to_fill = client_progress[client_address]['slot']
 					self.decide_value(slot_to_fill)
 
-				self.client_progress[client_address] = {'client_seq': request['client_seq'], 'slot': slot}
+				if client_address != '-1:-1':
+					self.client_progress[client_address] = {'client_seq': request['client_seq'], 'slot': slot}
 
 				if slot not in self.accepted:
 					self.accepted[slot] = self.get_new_accepted(client_address, request['client_seq'], leader_num, request['command'], set([self.replica_id, leader_id]), False)
@@ -206,12 +214,13 @@ class Paxos_server(Process):
 				self.leader_num = leader_num
 
 				if client_address in self.client_progress\
-					and request['client_seq'] < self.client_progress[client_address]['client_seq']\
+					and request['client_seq'] > self.client_progress[client_address]['client_seq']\
 					and not self.accepted[self.client_progress[client_address]['slot']]['done']:
 					slot_to_fill = client_progress[client_address]['slot']
 					self.decide_value(slot_to_fill)
 
-				self.client_progress[client_address] = {'client_seq': request['client_seq'], 'slot': slot}
+				if client_address != '-1:-1':
+					self.client_progress[client_address] = {'client_seq': request['client_seq'], 'slot': slot}
 
 				if slot not in self.accepted:
 					self.accepted[slot] = self.get_new_accepted(client_address, request['client_seq'], leader_num, request['command'], set([self.replica_id, leader_id]), False)
@@ -265,6 +274,7 @@ class Paxos_server(Process):
 			new_live_set = self.live_set
 			self.liveset_lock.release()
 			if self.replica_id == new_live_set[0] and self.num_followers == 0:
+				self.debug_print('I should be the one!')
 				self.runForLeader()
 
 
@@ -358,6 +368,8 @@ class Paxos_server(Process):
 				f.write("{} {} {} {}\n".format(str(self.executed_command_slot), log_entry['client_address'], log_entry['client_seq'], log_entry['command']))
 				message = "Reply {}".format(self.log[self.executed_command_slot]['client_seq'])
 				client_addr = self.accepted[self.executed_command_slot]['client_address'].split(':')
+				if client_addr[0] == '-1':
+					continue
 				# client_addr = self.log[self.executed_command_slot]['client_address'].split(':')
 				self.send_message(client_addr[0], client_addr[1], message)
 
@@ -392,7 +404,7 @@ class Paxos_server(Process):
 	def runForLeader(self):
 		self.num_followers = 1
 		new_leader_num = self.replica_id + (self.leader_num - (self.leader_num % self.num_replicas)) 
-		if new_leader_num < self.leader_num:
+		if new_leader_num <= self.leader_num:
 			new_leader_num += self.num_replicas
 		message = "IAmLeader {}".format(str(new_leader_num))
 		self.broadcast(message)

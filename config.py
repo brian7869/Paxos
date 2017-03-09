@@ -1,4 +1,4 @@
-TIMEOUT = 10
+TIMEOUT = 6
 HEARTBEART_CYCLE = 3
 
 # Max 15 (f = 7)
