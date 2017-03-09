@@ -3,7 +3,11 @@ import socket
 from time import sleep
 from random import random
 from config import *
+import time
 
+ACK = 1
+SKIP = 2
+VIEWCHG = 3
 # send request to known leader, if timeout, ask all replicas WhoIsLeader and pick one with f+1
 class Paxos_client(Process):
 	def __init__(self, client_id, host, port, max_failure, address_list, commands):
@@ -34,13 +38,22 @@ class Paxos_client(Process):
 			while True:
 				self.debug_print('wait for message')
 				try:
+					start_time = time.time()
 					message = sock.recv(65535)
-					if self.message_handler(message):
+					elapsed = time.time() - start_time
+					status = self.message_handler(message, client_seq)
+					if status == ACK:
 						sock.settimeout(TIMEOUT)
 						break
+					elif status == SKIP:
+						sock.settimeout(sock.gettimeout() - elapsed)
+					else:
+						self.send_message(self.address_list[self.leader][0]
+							, self.address_list[self.leader][1], req_message)
+						sock.settimeout(TIMEOUT)
 				except socket.timeout:
 					message = "ViewChange {} {} {}".format(self.host, str(self.port), str(client_seq))
-					sock.settimeout(sock.gettimeout()* ２)
+					sock.settimeout(sock.gettimeout()*2)
 					self.broadcast(message)
 		self.debug_print('End of request')
 
@@ -52,13 +65,13 @@ class Paxos_client(Process):
 		type_of_message, rest_of_message = tuple(message.split(' ', 1))
 
 		if type_of_message == 'Reply' and client_seq == int(rest_of_message):
-			return True
+			return ACK
 		elif type_of_message == 'LeaderIs':
 			# Modify: self.leader
 			self.leader = int(rest_of_message)
-			return False
+			return VIEWCHG
 		else:
-			return False
+			return SKIP
 
 
 	def broadcast(self, message):

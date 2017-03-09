@@ -1,5 +1,6 @@
 import paxos_server, multiprocessing, sys, paxos_client, os
 from config import *
+from paxos_utils import command_generator
 
 if __name__ == '__main__':
 	max_failure = int(sys.argv[1])
