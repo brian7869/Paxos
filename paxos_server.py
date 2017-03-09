@@ -140,6 +140,7 @@ class Paxos_server(Process):
 						self.debug_print(str(slot not in self.accepted))
 						self.debug_print(str(inner_dict['leader_num'] > self.accepted[slot]['leader_num']))
 						self.accepted[slot] = inner_dict
+						self.client_progress[inner_dict['client_address']] = {'client_seq': inner_dict['client_seq'], 'slot': slot}
 						if inner_dict['done']:
 							self.decide_value(slot)
 					elif inner_dict['leader_num'] == self.accepted[slot]['leader_num']:
@@ -372,8 +373,9 @@ class Paxos_server(Process):
 	def fill_holes(self):
 		if not self.accepted:
 			return
-		self.assigned_seq = max(self.accepted.keys())
-		for slot in xrange(int(self.assigned_seq)):
+		self.assigned_command_slot = max(self.accepted.keys())
+		#self.debug_print('assigned_seq(fill hole): '+str(self.assigned_command_slot))
+		for slot in xrange(int(self.assigned_command_slot)):
 			if slot not in self.accepted:
 				noop_request = "Request -1 -1 -1 NOOP"
 				self.propose(slot, noop_request)
@@ -399,3 +401,4 @@ class Paxos_server(Process):
 		for client_addr in self.client_progress.keys():
 			client_host, client_port = client_addr.split(':')
 			self.send_message(client_host, client_port, msg)
+
