@@ -6,7 +6,7 @@ from config import *
 
 # make it possible to skip some sequence number
 class Paxos_server(Process):
-	def __init__(self, max_failure, replica_id, address_list):
+	def __init__(self, max_failure, replica_id, address_list, can_skip_slot):
 		super(Paxos_server, self).__init__()
 		# 0. Initialize internal data
 		self.max_failure = max_failure
@@ -15,6 +15,7 @@ class Paxos_server(Process):
 		self.address_list = address_list
 		self.host = address_list[replica_id][0]
 		self.port_number = address_list[replica_id][1]
+		self.can_skip_slot = can_skip_slot
 		
 		self.log_filename = 'log/server_{}.log'.format(str(replica_id))
 		self.chat_log_filename = 'chat_log/server_{}.chat_log'.format(str(replica_id))
@@ -47,8 +48,8 @@ class Paxos_server(Process):
 
 		self.replica_heartbeat = []
 		self.live_set = []
-		self.heartbeat_lock = threading.Lock()
-		self.liveset_lock = threading.Lock()
+		# self.heartbeat_lock = threading.Lock()
+		# self.liveset_lock = threading.Lock()
 		
 		self.load_log()
 		for i in xrange(self.num_replicas):
@@ -82,15 +83,15 @@ class Paxos_server(Process):
 		# Modify: self.leader_num
 		while True:
 			new_live_set = []
-			self.heartbeat_lock.acquire()
+			# self.heartbeat_lock.acquire()
 			for i in xrange(self.num_replicas):
 				if (datetime.datetime.now() - self.replica_heartbeat[i]).total_seconds() < TIMEOUT or i == self.replica_id:
 					new_live_set.append(i)
-			self.heartbeat_lock.release()
+			# self.heartbeat_lock.release()
 
-			self.liveset_lock.acquire()
+			# self.liveset_lock.acquire()
 			self.live_set = new_live_set
-			self.liveset_lock.release()
+			# self.liveset_lock.release()
 
 			if self.replica_id == new_live_set[0] and self.num_followers == 0 and \
 				( (self.leader_num % self.num_replicas) not in new_live_set or self.leader_num == -1 ):
@@ -114,9 +115,9 @@ class Paxos_server(Process):
 		if type_of_message == "Heartbeat":
 			# Modify: self.replica_heartbeat
 			sender_id = int(rest_of_message)
-			self.heartbeat_lock.acquire()
+			# self.heartbeat_lock.acquire()
 			self.replica_heartbeat[sender_id] = datetime.datetime.now()
-			self.heartbeat_lock.release()
+			# self.heartbeat_lock.release()
 		elif type_of_message == "IAmLeader":
 			# Modify: self.leader_num
 			new_leader_num = int(rest_of_message)
@@ -246,8 +247,9 @@ class Paxos_server(Process):
 					else:
 						self.propose(allocated_slot, message)
 				else:
-					self.assigned_command_slot += 1
-					assigned_slot = self.assigned_command_slot
+					# self.assigned_command_slot += 1
+					# assigned_slot = self.assigned_command_slot
+					assigned_slot = self.get_assigned_slot()
 					self.accepted[assigned_slot] = self.get_new_accepted(client_address, request['client_seq'], self.leader_num, request['command'], set([self.replica_id]), False)
 					self.propose(assigned_slot, message)
 					self.accept(self.replica_id, assigned_slot, message)
@@ -261,9 +263,9 @@ class Paxos_server(Process):
 			host, port, client_seq = tuple(rest_of_message.split(' ', 2))
 			if host+':'+port not in self.client_progress:
 				self.client_progress[host+':'+port] = {'client_seq': int(client_seq), 'slot': -1}
-			self.liveset_lock.acquire()
+			# self.liveset_lock.acquire()
 			new_live_set = self.live_set
-			self.liveset_lock.release()
+			# self.liveset_lock.release()
 			if self.replica_id == new_live_set[0] and self.num_followers == 0 and \
 				( self.leader_num == -1 ):
 				self.runForLeader()
@@ -374,7 +376,6 @@ class Paxos_server(Process):
 		if not self.accepted:
 			return
 		self.assigned_command_slot = max(self.accepted.keys())
-		#self.debug_print('assigned_seq(fill hole): '+str(self.assigned_command_slot))
 		for slot in xrange(int(self.assigned_command_slot)):
 			if slot not in self.accepted:
 				noop_request = "Request -1 -1 -1 NOOP"
@@ -402,3 +403,6 @@ class Paxos_server(Process):
 			client_host, client_port = client_addr.split(':')
 			self.send_message(client_host, client_port, msg)
 
+	def get_assigned_slot(self):
+		self.assigned_command_slot += (1 + self.can_skip_slot)
+		return self.assigned_command_slot
