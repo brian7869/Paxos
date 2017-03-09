@@ -270,7 +270,8 @@ class Paxos_server(Process):
 
 
 	def send_message(self, host, port_number, message):
-		self.debug_print("=== sending message :"+ message + " ===")
+		if message.split(' ')[0] != 'Heartbeat':
+			self.debug_print("=== sending message :"+ message + " ===")
 		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		sock.connect((host, int(port_number)))
 		sock.sendall(message)
