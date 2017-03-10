@@ -29,14 +29,14 @@ class Paxos_client(Process):
 		sock.settimeout(TIMEOUT)
 
 		for client_seq in xrange(len(self.commands)):
-			sleep(random())
+			# sleep(random())
 			self.debug_print('send request: '+self.commands[client_seq])
 			req_message = "Request {} {} {} {}".format(self.host, str(self.port)
 						, str(client_seq), 'client'+str(self.client_id)+':'+self.commands[client_seq])
 			self.send_message(self.address_list[self.leader][0]
 				, self.address_list[self.leader][1], req_message)
 			while True:
-				self.debug_print('wait for message')
+				# self.debug_print('wait for message')
 				try:
 					start_time = time.time()
 					message = sock.recv(65535)
@@ -48,19 +48,22 @@ class Paxos_client(Process):
 					elif status == SKIP:
 						sock.settimeout(sock.gettimeout() - elapsed)
 					else:
+						# self.debug_print('resend request: '+self.commands[client_seq])
 						self.send_message(self.address_list[self.leader][0]
 							, self.address_list[self.leader][1], req_message)
 						sock.settimeout(TIMEOUT)
 				except socket.timeout:
+					# self.debug_print('send viewchange: '+str(client_seq))
 					message = "ViewChange {} {} {}".format(self.host, str(self.port), str(client_seq))
 					sock.settimeout(sock.gettimeout()*2)
 					self.broadcast(message)
 		self.debug_print('End of request')
 
 	def message_handler(self, message, client_seq):
-		# Possible message
+		# Possible messages
 		# From primary:
 		# "Reply <client_seq>"
+		# "LeaderIs <leader_id>"
 		# return True if command succeeded
 		type_of_message, rest_of_message = tuple(message.split(' ', 1))
 
@@ -80,7 +83,7 @@ class Paxos_client(Process):
 
 
 	def send_message(self, host, port_number, message):
-		self.debug_print("=== sending message :"+ message + " ===")
+		# self.debug_print("=== sending message :"+ message + " ===")
 		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		sock.connect((host, port_number))
 		sock.sendall(message)

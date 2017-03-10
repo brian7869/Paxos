@@ -5,7 +5,6 @@ from time import sleep
 from config import *
 from random import random
 
-# make it possible to skip some sequence number
 class Paxos_server(Process):
 	def __init__(self, max_failure, replica_id, address_list, can_skip_slot, fail_view_change = 0):
 		super(Paxos_server, self).__init__()
@@ -40,6 +39,7 @@ class Paxos_server(Process):
 									#		'slot':<slot_num>
 									#	}
 									# }
+		self.client_list = []	# [<client_address>]
 		self.executed_command_slot = -1
 		self.assigned_command_slot = -1
 		self.leader_num = -1
@@ -82,7 +82,6 @@ class Paxos_server(Process):
 			sleep(HEARTBEART_CYCLE)
 
 	def failure_detector(self):
-		# Modify: self.leader_num
 		while True:
 			new_live_set = []
 			self.heartbeat_lock.acquire()
@@ -102,7 +101,7 @@ class Paxos_server(Process):
 			sleep(TIMEOUT)
 
 	def message_handler(self, message):
-		# Possible message
+		# Possible messages
 		# From replicas:
 		# 0. "Heartbeat <sender_id>"
 		# 1. "IAmLeader <leader_num>"
@@ -114,14 +113,14 @@ class Paxos_server(Process):
 		# 2. "ViewChange <host> <port_number> <client_seq>"
 		type_of_message, rest_of_message = tuple(message.split(' ', 1))
 
+		# if type_of_message != "Heartbeat":
+		# 	self.debug_print(" *** recieving message: {} ***".format(message))
 		if type_of_message == "Heartbeat":
-			# Modify: self.replica_heartbeat
 			sender_id = int(rest_of_message)
 			self.heartbeat_lock.acquire()
 			self.replica_heartbeat[sender_id] = datetime.datetime.now()
 			self.heartbeat_lock.release()
 		elif type_of_message == "IAmLeader":
-			# Modify: self.leader_num
 			new_leader_num = int(rest_of_message)
 			if new_leader_num > self.leader_num:
 				leader_id = new_leader_num % self.num_replicas
@@ -130,7 +129,6 @@ class Paxos_server(Process):
 				self.send_message(self.address_list[leader_id][0], self.address_list[leader_id][1], response)
 				self.leader_num = new_leader_num
 		elif type_of_message == "YouAreLeader":
-			# TODO
 			new_leader_num, accepted = tuple(rest_of_message.split(' ', 1))
 			new_leader_num = int(new_leader_num)
 			if self.num_followers > 0 and new_leader_num > self.leader_num:
@@ -140,11 +138,9 @@ class Paxos_server(Process):
 				for slot, inner_dict in accepted.iteritems():
 					slot = int(slot)
 					if slot not in self.accepted or inner_dict['leader_num'] > self.accepted[slot]['leader_num']:
-						self.debug_print('add or replace slot: {}'.format(str(slot)))
-						self.debug_print(str(slot not in self.accepted))
-						#self.debug_print(str(inner_dict['leader_num'] > self.accepted[slot]['leader_num']))
 						self.accepted[slot] = inner_dict
-						self.client_progress[inner_dict['client_address']] = {'client_seq': inner_dict['client_seq'], 'slot': slot}
+						if inner_dict['client_address'] not in self.client_progress or inner_dict['client_seq'] > self.client_progress[inner_dict['client_address']]['client_seq']:
+							self.client_progress[inner_dict['client_address']] = {'client_seq': inner_dict['client_seq'], 'slot': slot}
 						if inner_dict['done']:
 							self.decide_value(slot)
 					elif inner_dict['leader_num'] == self.accepted[slot]['leader_num']:
@@ -157,11 +153,11 @@ class Paxos_server(Process):
 					self.leader_num = int(new_leader_num)
 					msg = "LeaderIs {}".format(str(self.replica_id))
 					self.broadcast_client(msg)
+					self.repropose_undecided_value()
 					### FOR TESTING ###
 					if self.fail_view_change:
 						sys.exit()
 					### FOR TESTING ###
-					self.repropose_undecided_value()
 					self.fill_holes()
 					self.num_followers = 0
 
@@ -172,9 +168,8 @@ class Paxos_server(Process):
 			slot = int(slot)
 			request = self.parse_request(request_message)
 			client_address = self.get_client_address(request)
-			if leader_num >= self.leader_num:
+			if leader_num >= self.leader_num and (client_address not in self.client_progress or request['client_seq'] >= self.client_progress[client_address]['client_seq']):
 				self.leader_num = leader_num
-
 
 				if client_address in self.client_progress\
 					and request['client_seq'] > self.client_progress[client_address]['client_seq']\
@@ -182,7 +177,7 @@ class Paxos_server(Process):
 					slot_to_fill = self.client_progress[client_address]['slot']
 					self.decide_value(slot_to_fill)
 
-				if client_address != '-1:-1':
+				if client_address != '-1:-1':	# Don't need to update client_progress for NOOP request
 					self.client_progress[client_address] = {'client_seq': request['client_seq'], 'slot': slot}
 
 				if slot not in self.accepted:
@@ -204,6 +199,8 @@ class Paxos_server(Process):
 
 				
 		elif type_of_message == "Accept":
+			# if self.isLeader():
+			# 	self.debug_print(" *** receiving message: {} ***".format(message))
 			sender_id, leader_num, slot, request_message = tuple(rest_of_message.split(' ', 3))
 			leader_num = int(leader_num)
 			leader_id = leader_num % self.num_replicas
@@ -211,13 +208,13 @@ class Paxos_server(Process):
 			request = self.parse_request(request_message)
 			sender_id = int(sender_id)
 			client_address = self.get_client_address(request)
-			if leader_num >= self.leader_num:
+			if leader_num >= self.leader_num and (client_address not in self.client_progress or request['client_seq'] >= self.client_progress[client_address]['client_seq']):
 				self.leader_num = leader_num
 
 				if client_address in self.client_progress\
 					and request['client_seq'] > self.client_progress[client_address]['client_seq']\
 					and not self.accepted[self.client_progress[client_address]['slot']]['done']:
-					slot_to_fill = client_progress[client_address]['slot']
+					slot_to_fill = self.client_progress[client_address]['slot']
 					self.decide_value(slot_to_fill)
 
 				if client_address != '-1:-1':
@@ -230,7 +227,7 @@ class Paxos_server(Process):
 						and self.accepted[slot]['client_seq'] == request['client_seq']:
 						self.accepted[slot]['accepted_replicas'].add(sender_id)
 					else: # larger leader_num wins
-						debug_print('over write happens!!!')
+						# debug_print('over write happens!!!')
 						self.accepted[slot] = self.get_new_accepted(client_address, request['client_seq'], leader_num, request['command'], set([self.replica_id, leader_id]), False)
 
 				if len(self.accepted[slot]['accepted_replicas']) >= self.max_failure + 1\
@@ -239,15 +236,17 @@ class Paxos_server(Process):
 					self.execute()
 					self.accepted[slot]['done'] = True
 
-
-				
 		elif type_of_message == "Request":
 			if self.isLeader():
 				request = self.parse_request(message)
 				client_address = self.get_client_address(request)
-				self.debug_print('leader processing client request')
-				# client resend the request due to timeout
-				# what if the client_seq in this request is greater than self.accepted[client_address]['client_seq'] and the one in my accepted is not in the log?
+				if client_address not in self.client_list:
+					self.client_list.append(client_address)
+
+				# self.debug_print('leader processing client request')
+				# self.debug_print(str(client_address in self.client_progress))
+				# if client_address in self.client_progress:
+				# 	self.debug_print(str(self.client_progress[client_address]['client_seq']))
 				if client_address in self.client_progress\
 					and self.client_progress[client_address]['client_seq'] == request['client_seq']:
 					allocated_slot = self.client_progress[client_address]['slot']
@@ -255,52 +254,57 @@ class Paxos_server(Process):
 						message = "Reply {}".format(request['client_seq'])
 						self.send_message(request['host'], request['port_number'], message)
 					else:
+						# self.debug_print("Repropose request {}".format(message))
 						self.propose(allocated_slot, message)
 				else:
 					assigned_slot = self.get_new_assigned_slot()
 					self.accepted[assigned_slot] = self.get_new_accepted(client_address, request['client_seq'], self.leader_num, request['command'], set([self.replica_id]), False)
+					self.client_progress[client_address] = {'client_seq': request['client_seq'], 'slot': assigned_slot}
 					self.propose(assigned_slot, message)
 					self.accept(self.replica_id, assigned_slot, message)
 				
 			else:	# forward message to current leader
-				leader_id = self.leader_num % self.num_replicas
-				self.send_message(self.address_list[leader_id][0], self.address_list[leader_id][1], message)
+				if self.leader_num != -1:
+					leader_id = self.leader_num % self.num_replicas
+					self.send_message(self.address_list[leader_id][0], self.address_list[leader_id][1], message)
 
 			
 		elif type_of_message == 'ViewChange':
 			host, port, client_seq = tuple(rest_of_message.split(' ', 2))
-			if host+':'+port not in self.client_progress:
-				self.client_progress[host+':'+port] = {'client_seq': int(client_seq), 'slot': -1}
+			client_address = host+':'+port
+			if client_address not in self.client_list:
+				self.client_list.append(client_address)
 			self.liveset_lock.acquire()
 			new_live_set = self.live_set
 			self.liveset_lock.release()
-			if self.replica_id == new_live_set[0] and self.num_followers == 0:
-				self.debug_print('I should be the one!')
+			if self.replica_id == new_live_set[0]:
+				# self.debug_print('I should be the one!')
 				self.runForLeader()
 
-
+	################# Here are helper functions for sending messages #################
 	def send_message(self, host, port_number, message):
-		if message.split(' ')[0] != 'Heartbeat':
-			self.debug_print("=== sending message :"+ message + " ===")
+		type_of_message, rest_of_message = message.split(' ', 1)
+		# if type_of_message == "YouAreLeader":
+		# 	new_leader_num, accepted = tuple(rest_of_message.split(' ', 1))
+		# 	self.debug_print("=== sending message : {} {} ===".format(type_of_message, new_leader_num))
 		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		sock.connect((host, int(port_number)))
 		sock.sendall(message)
 		sock.close()
 
 	def broadcast(self, message):
+		type_of_message, rest_of_message = message.split(' ', 1)
+		# if type_of_message != "Heartbeat":
+		# 	self.debug_print("=== sending message : {} ===".format(message))
 		for i in xrange(self.num_replicas):
 			if i != self.replica_id:
 				self.send_message(self.address_list[i][0], self.address_list[i][1], message)
 
-	# Need to update chat_log accordingly ?!
-	def load_log(self):
-		if os.path.isfile(self.log_filename):
-			mode = "r"
-			with open(self.log_filename, mode) as f:
-				for line in f:
-					line = line.rstrip('\n')
-					seq, client_address, client_seq, command = tuple(line.split(' ', 3))
-					self.log[seq] = self.get_new_log(client_address, client_seq, command)
+	def broadcast_client(self, msg):
+		# self.debug_print(" sending message: " + msg)
+		for client_addr in self.client_list:
+			client_host, client_port = client_addr.split(':')
+			self.send_message(client_host, client_port, msg)
 
 	def propose(self, seq, request):
 		propose_message = "Propose {} {} {}".format(str(self.leader_num), str(seq), request)
@@ -309,7 +313,9 @@ class Paxos_server(Process):
 	def accept(self, sender_id, seq, request):
 		accept_message = "Accept {} {} {} {}".format(str(sender_id), str(self.leader_num), str(seq), request)
 		self.broadcast(accept_message)
+	################# End of helper functions for sending messages #################
 
+	################# Here are helper functions for creating objects #################
 	def get_new_accepted(self, client_addr, client_seq, leader_num, command, accepted_replicas, done):
 		accepted = {
 			'client_address': client_addr,
@@ -329,17 +335,6 @@ class Paxos_server(Process):
 		}
 		return log
 
-	def get_new_merged_accepted(self, client_seq, leader_num, client_address, command, accepted_replicas, done):
-		merged_accepted = {
-			'client_seq': client_seq, 
-			'leader_num': leader_num, 
-			'client_address': client_address, 
-			'command': command, 
-			'accepted_replicas': accepted_replicas, 
-			'done': done
-		}
-		return merged_accepted
-
 	def parse_request(self, request_message):
 		components = request_message.split(' ',4)
 		request = {
@@ -349,13 +344,15 @@ class Paxos_server(Process):
 			'command': components[4]
 		}
 		return request
+	################# End of helper functions for creating objects #################
 
+	################# Here are helper functions for learner #################
 	def decide_value(self, slot):
 		self.append_log(slot, self.accepted[slot]['client_address'], self.accepted[slot]['client_seq'], self.accepted[slot]['command'])
 		self.execute()
 
 	def append_log(self, seq, client_address, client_seq, command):
-		self.debug_print('Write to Log!!!')
+		# self.debug_print('Write to Log!!!')
 		with open(self.log_filename, 'a') as f:
 			new_log_entry = "{} {} {} {}".format(str(seq), client_address, str(client_seq), command)
 			f.write(new_log_entry+'\n')
@@ -366,17 +363,26 @@ class Paxos_server(Process):
 			while self.executed_command_slot + 1 in self.log:
 				self.executed_command_slot += 1
 				log_entry = self.accepted[self.executed_command_slot]
-				f.write("{} {} {} {}\n".format(str(self.executed_command_slot), log_entry['client_address'], log_entry['client_seq'], log_entry['command']))
+				f.write("{}\t{}\t{}\t{}\t{}\n".format(str(self.executed_command_slot), log_entry['client_address'], log_entry['client_seq'], log_entry['leader_num'], log_entry['command']))
 				message = "Reply {}".format(self.log[self.executed_command_slot]['client_seq'])
 				client_addr = self.accepted[self.executed_command_slot]['client_address'].split(':')
 				if client_addr[0] == '-1':
 					continue
-				# client_addr = self.log[self.executed_command_slot]['client_address'].split(':')
 				self.send_message(client_addr[0], client_addr[1], message)
+	################# End of helper functions for learner #################
+
+	################# Here are helper functions for view change #################
+	def runForLeader(self):
+		self.num_followers = 1
+		new_leader_num = self.replica_id + (self.leader_num - (self.leader_num % self.num_replicas)) 
+		if new_leader_num <= self.leader_num:
+			new_leader_num += self.num_replicas
+		message = "IAmLeader {}".format(str(new_leader_num))
+		# self.debug_print("Make America Great Again!!!")
+		self.broadcast(message)
 
 	def repropose_undecided_value(self):
 		for slot, inner_dict in self.accepted.iteritems():
-			#if len(inner_dict['accepted_replicas']) < self.max_failure + 1:
 			if not inner_dict['done']:
 				host, port_number = tuple(inner_dict['client_address'].split(':', 1))
 				request = "Request {} {} {} {}".format(host, port_number, inner_dict['client_seq'], inner_dict['command'])
@@ -391,34 +397,36 @@ class Paxos_server(Process):
 		for slot in xrange(int(self.assigned_command_slot)):
 			if slot not in self.accepted:
 				noop_request = "Request -1 -1 -1 NOOP"
+				self.accepted[slot] = self.get_new_accepted('-1:-1', -1, self.leader_num, 'NOOP', set([self.replica_id]), False)
 				self.propose(slot, noop_request)
+	################# End of helper functions for view change #################
 
-	def debug_print(self, msg):
-		print str(self.replica_id) + ': '+msg
+	################# Here are miscellaneous helper functions #################
+	def load_log(self):
+		if os.path.isfile(self.log_filename):
+			mode = "r"
+			with open(self.log_filename, mode) as f:
+				for line in f:
+					line = line.rstrip('\n')
+					seq, client_address, client_seq, command = tuple(line.split(' ', 3))
+					self.log[seq] = self.get_new_log(client_address, client_seq, command)
 
 	def isLeader(self):
-		return self.leader_num % self.num_replicas == self.replica_id
+		return self.leader_num != -1 and self.leader_num % self.num_replicas == self.replica_id
 
 	def get_client_address(self, request):
 		return "{}:{}".format(request['host'], request['port_number'])
 
-	def runForLeader(self):
-		self.num_followers = 1
-		new_leader_num = self.replica_id + (self.leader_num - (self.leader_num % self.num_replicas)) 
-		if new_leader_num <= self.leader_num:
-			new_leader_num += self.num_replicas
-		message = "IAmLeader {}".format(str(new_leader_num))
-		self.broadcast(message)
-
-	def broadcast_client(self, msg):
-		for client_addr in self.client_progress.keys():
-			client_host, client_port = client_addr.split(':')
-			self.send_message(client_host, client_port, msg)
-
 	def get_new_assigned_slot(self):
 		jump_slot = 0
 		if self.can_skip_slot > 0:
-			jump_slot = int(0.5 + random())
+			jump_slot = int(0.25 + random())
 			self.can_skip_slot -= jump_slot
 		self.assigned_command_slot += (1 + jump_slot)
 		return self.assigned_command_slot
+	################# End of miscellaneous helper functions #################
+
+	################# Here is helper function for debugging  #################
+	def debug_print(self, msg):
+		print str(self.replica_id) + ': '+msg
+	################# End of helper function for debugging  #################

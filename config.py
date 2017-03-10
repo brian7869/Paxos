@@ -1,5 +1,5 @@
-TIMEOUT = 6
-HEARTBEART_CYCLE = 3
+TIMEOUT = 1.5
+HEARTBEART_CYCLE = 0.5
 
 # Max 15 (f = 7)
 server_addresses = 	[
