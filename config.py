@@ -3,11 +3,11 @@ HEARTBEART_CYCLE = 0.5
 
 # Max 15 (f = 7)
 server_addresses = 	[
-						('localhost', 5500),
-						('localhost', 5501),
-						('localhost', 5502),
-						('localhost', 5503),
-						('localhost', 5504),
+						('141.213.74.76', 5500),
+						('141.213.74.74', 5501),
+						('141.213.74.63', 5502),
+						('141.213.74.73', 5503),
+						('141.213.74.60', 5504),
 						('localhost', 5505),
 						('localhost', 5506),
 						('localhost', 5507),
@@ -22,9 +22,9 @@ server_addresses = 	[
 
 # Max 30
 client_addresses = 	[
-						('localhost', 5515),
-						('localhost', 5516),
-						('localhost', 5517),
+						('141.213.74.72', 5515),
+						('141.213.74.65', 5516),
+						('141.213.74.64', 5517),
 						('localhost', 5518),
 						('localhost', 5519),
 						('localhost', 5520),

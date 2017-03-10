@@ -113,8 +113,8 @@ class Paxos_server(Process):
 		# 2. "ViewChange <host> <port_number> <client_seq>"
 		type_of_message, rest_of_message = tuple(message.split(' ', 1))
 
-		# if type_of_message != "Heartbeat":
-		# 	self.debug_print(" *** recieving message: {} ***".format(message))
+		if type_of_message == "Heartbeat":
+			self.debug_print(" *** recieving message: {} ***".format(message))
 		if type_of_message == "Heartbeat":
 			sender_id = int(rest_of_message)
 			self.heartbeat_lock.acquire()
@@ -363,7 +363,7 @@ class Paxos_server(Process):
 			while self.executed_command_slot + 1 in self.log:
 				self.executed_command_slot += 1
 				log_entry = self.accepted[self.executed_command_slot]
-				f.write("{}\t{}\t{}\t{}\t{}\n".format(str(self.executed_command_slot), log_entry['client_address'], log_entry['client_seq'], log_entry['leader_num'], log_entry['command']))
+				f.write("{}\t{}\t{}\t{}\n".format(str(self.executed_command_slot), log_entry['client_address'], log_entry['client_seq'], log_entry['command']))
 				message = "Reply {}".format(self.log[self.executed_command_slot]['client_seq'])
 				client_addr = self.accepted[self.executed_command_slot]['client_address'].split(':')
 				if client_addr[0] == '-1':
